@@ -87,6 +87,21 @@ defmodule OMG.State.PersistenceTest do
   end
 
   @tag fixtures: [:alice, :state_empty]
+  test "TEMPORARY TEST: persists exiting, even if the exiting utxo was created in a tx from mempool",
+       %{alice: alice, db_pid: db_pid, state_empty: state} do
+    mempool_state =
+      state
+      |> persist_deposit([%{owner: alice.addr, currency: @eth, amount: 20, blknum: 1}], db_pid)
+      |> exec(create_recovered([{1, 0, 0, alice}], @eth, [{alice, 3}]))
+
+    # we don't use `persist_exit_utxos` since we want to skip the check - our mempool isn't flushed to persistence yet!
+    {:ok, {db_updates, _}, exited_state} = Core.exit_utxos([Utxo.position(@blknum1, 0, 0)], mempool_state)
+    :ok = OMG.DB.multi_update(db_updates, db_pid)
+
+    exited_state |> persist_form(db_pid)
+  end
+
+  @tag fixtures: [:alice, :state_empty]
   test "persists piggyback related exits",
        %{alice: alice, db_pid: db_pid, state_empty: state} do
     tx = create_recovered([{1, 0, 0, alice}], @eth, [{alice, 7}, {alice, 3}])

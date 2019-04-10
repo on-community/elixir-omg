@@ -48,7 +48,8 @@ defmodule OMG.StateTest do
           {OMG.State, []},
           {Phoenix.PubSub.PG2, [name: OMG.InternalEventBus]}
         ],
-        strategy: :one_for_one
+        strategy: :one_for_one,
+        name: :sup
       )
 
     :ok
@@ -67,5 +68,30 @@ defmodule OMG.StateTest do
     assert {:ok, _db, _} = State.exit_utxos([Utxo.position(blknum, 0, 0)])
     # close block
     assert {:ok, _db} = State.close_block(123)
+  end
+
+  @tag fixtures: [:alice, :standalone_state_server]
+  test "TEMPORARY TEST: has no race condition between exiting and form_block", %{alice: alice} do
+    # FIXME: there is a different test testing the same thing added in `state/persistence_test.exs`
+    #        decide which is better and keep that, but only after this is green
+    #        Then, fix test title(s)
+    #        Notice, that this test uses `close_block` specifically, not sure if relevant
+    # deposits, transactions, utxo existence
+    assert {:ok, _} = State.deposit([%{owner: alice.addr, currency: @eth, amount: 10, blknum: 1}])
+    # creates {1000, 0, 0} utxo
+    assert {:ok, _} = State.exec(TestHelper.create_recovered([{1, 0, 0, alice}], @eth, [{alice, 3}]), :ignore)
+    assert true == State.utxo_exists?(Utxo.position(1000, 0, 0))
+    # exits it
+    assert {:ok, _db, _} = State.exit_utxos([Utxo.position(1000, 0, 0)])
+    assert false == State.utxo_exists?(Utxo.position(1000, 0, 0))
+
+    # forming block will use `pending_txs`, which contain the one creating {1000, 0, 0}, it will pop back up after restart :(
+    assert {:ok, db_updates} = State.close_block(123)
+    OMG.DB.multi_update(db_updates)
+
+    :ok = Supervisor.terminate_child(:sup, OMG.State)
+    {:ok, _} = Supervisor.restart_child(:sup, OMG.State)
+
+    assert false == State.utxo_exists?(Utxo.position(1000, 0, 0))
   end
 end

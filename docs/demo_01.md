@@ -9,7 +9,7 @@ Run a developer's Child chain server and start IEx REPL with code and config loa
 ### PREPARATIONS
 
 # we're going to be using the exthereum's client to geth's JSON RPC
-{:ok, _} = Application.ensure_all_started(:ethereumex)
+{:ok, _} = Application.ensure_all_started(:omg_eth)
 
 alias OMG.Eth
 alias OMG.Crypto
@@ -17,8 +17,6 @@ alias OMG.DevCrypto
 alias OMG.State.Transaction
 alias OMG.TestHelper
 alias OMG.Integration.DepositHelper
-
-DeferredConfig.populate(:omg_eth)
 
 alice = TestHelper.generate_entity()
 bob = TestHelper.generate_entity()

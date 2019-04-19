@@ -22,14 +22,12 @@ Run `iex -S mix run --no-start --config ~/config.exs` and inside REPL do:
 ### PREPARATIONS
 
 # we're going to be using the exthereum's client to geth's JSON RPC
-{:ok, _} = Application.ensure_all_started(:ethereumex)
+{:ok, _} = Application.ensure_all_started(:omg_eth)
 
 alias OMG.Eth
 alias OMG.Crypto
 alias OMG.DevCrypto
 alias OMG.TestHelper
-
-DeferredConfig.populate(:omg_eth)
 
 {:ok, contract_addr} = Application.fetch_env!(:omg_eth, :contract_addr) |> Crypto.decode_address()
 

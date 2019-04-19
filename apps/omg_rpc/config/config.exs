@@ -14,6 +14,8 @@ config :omg_rpc,
 config :omg_rpc, OMG.RPC.Web.Endpoint,
   secret_key_base: {:system, "SECRET_KEY_BASE"},
   render_errors: [view: OMG.RPC.Web.Views.Error, accepts: ~w(json)],
+  # NOTE: see `OMG.RPC.Web.Socket` for details
+  pubsub: [name: OMG.RPC.PubSub, adapter: Phoenix.PubSub.PG2],
   instrumenters: [Appsignal.Phoenix.Instrumenter]
 
 # Use Poison for JSON parsing in Phoenix

@@ -23,6 +23,7 @@ defmodule OMG.ChildChain do
   alias OMG.Block
   alias OMG.ChildChain.FeeServer
   alias OMG.ChildChain.FreshBlocks
+  alias OMG.ChildChain.Notifications
   alias OMG.Fees
   alias OMG.State
   alias OMG.State.Transaction
@@ -37,7 +38,8 @@ defmodule OMG.ChildChain do
     with {:ok, recovered_tx} <- Transaction.Recovered.recover_from(transaction),
          {:ok, fees} <- FeeServer.transaction_fees(),
          fees = Fees.for_tx(recovered_tx, fees),
-         {:ok, {tx_hash, blknum, tx_index}} <- State.exec(recovered_tx, fees) do
+         {:ok, {tx_hash, blknum, tx_index}} = exec_response <- State.exec(recovered_tx, fees) do
+      :ok = Notifications.trigger(:submit, %{tx: recovered_tx, exec_response: exec_response})
       {:ok, %{txhash: tx_hash, blknum: blknum, txindex: tx_index}}
     end
     |> result_with_logging()

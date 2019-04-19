@@ -16,6 +16,9 @@ defmodule OMG.RPC.Web.Endpoint do
   use Phoenix.Endpoint, otp_app: :omg_rpc
   use Appsignal.Phoenix
 
+  # NOTE: one connects to `ws://url//unstable_experimental_socket/websocket` here (the transport is appended)
+  socket("/unstable_experimental_socket", OMG.RPC.Web.Socket, websocket: true)
+
   # Serve at "/" the static files from "priv/static" directory.
   #
   # You should set gzip to true if you are running phx.digest

@@ -46,6 +46,7 @@ defmodule OMG.Watcher.Mixfile do
       {:omg_db, in_umbrella: true},
       {:omg_eth, in_umbrella: true},
       {:omg_utils, in_umbrella: true},
+      {:omg_socket_client, in_umbrella: true},
 
       # TEST ONLY
       # here only to leverage common test helpers and code

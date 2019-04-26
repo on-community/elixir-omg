@@ -19,9 +19,26 @@ defmodule OMG.Watcher.Web.Channel.Transfer do
 
   use Phoenix.Channel, log_join: :debug
 
-  def join("transfer:" <> _address, _params, socket) do
+  def join("transfer:" <> _address = topic, _params, socket) do
+    notification_service_url = Application.fetch_env!(:omg_watcher, :notification_service_url)
+
+    {:ok, external_socket} =
+      [url: "#{notification_service_url}/unstable_experimental_socket/websocket"]
+      |> PhoenixClient.Socket.start_link()
+
+    # wait a bit!
+    # FIXME: improve
+    Process.sleep(1500)
+
+    {:ok, _response, channel} = PhoenixClient.Channel.join(external_socket, topic)
+
     {:ok, socket}
   end
 
   def join(_, _, _), do: {:error, :invalid_parameter}
+
+  def handle_info(%PhoenixClient.Message{event: event, payload: payload}, socket) do
+    :ok = push(socket, event, payload)
+    {:noreply, socket}
+  end
 end

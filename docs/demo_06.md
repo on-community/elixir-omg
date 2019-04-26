@@ -29,6 +29,7 @@ eth = Eth.RootChain.eth_pseudo_address()
 {:ok, _} = Eth.DevHelpers.import_unlock_fund(alice)
 
 child_chain_url = "localhost:9656"
+watcher_url = "localhost:7434"
 
 # sends a deposit transaction _to Ethereum_
 # we need to uncover the height at which the deposit went through on the root chain
@@ -40,22 +41,27 @@ tx =
   TestHelper.create_encoded([{deposit_blknum, 0, 0, alice}], eth, [{bob, 9}]) |>
   OMG.Utils.HttpRPC.Encoding.to_hex()
 
-socket_opts = [url: "ws://#{child_chain_url}/unstable_experimental_socket/websocket"]
+# socket_opts = [url: "ws://#{child_chain_url}/unstable_experimental_socket/websocket"]
+socket_opts = [url: "ws://#{watcher_url}/socket/websocket"]
+
 {:ok, socket} = PhoenixClient.Socket.start_link(socket_opts)
 
 # wait a bit!
 
 {:ok, _response, channel} = PhoenixClient.Channel.join(socket, "transfer:#{bob_enc}")
 
-# submits a transaction to the child chain
-# this only will work after the deposit has been "consumed" by the child chain, be patient (~15sec)
-# use the hex-encoded tx bytes and `transaction.submit` Http-RPC method described in README.md for child chain server
 %{"data" => %{"blknum" => child_tx_block_number}} =
   ~c(echo '{"transaction": "#{tx}"}' | http POST #{child_chain_url}/transaction.submit) |>
   :os.cmd() |>
   Jason.decode!()
 
 flush
+
+# possibly flush again - the second event on tx inclusion comes an instant later
+
+
+###
+# after demo is done - disconnect to stop receiving events
 
 PhoenixClient.Socket.stop(socket)
 

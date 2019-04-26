@@ -6,7 +6,9 @@
 use Mix.Config
 
 # child chain url
-config :omg_watcher, child_chain_url: {:system, "CHILD_CHAIN_URL", "http://localhost:9656"}
+child_chain_host_port = "localhost:9656"
+config :omg_watcher, child_chain_url: {:system, "CHILD_CHAIN_URL", "http://#{child_chain_host_port}"}
+config :omg_watcher, notification_service_url: {:system, "NOTIFICATION_SERVICE_URL", "ws://#{child_chain_host_port}"}
 
 # General application configuration
 # see [here](README.md) for documentation

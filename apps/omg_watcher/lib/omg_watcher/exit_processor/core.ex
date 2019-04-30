@@ -319,8 +319,8 @@ defmodule OMG.Watcher.ExitProcessor.Core do
     updated_ifes =
       challenges
       |> Enum.reduce(ifes_to_update, fn %{tx_hash: tx_hash, output_index: output_index}, acc ->
-        with {:ok, {ife, _}} <- Map.fetch(acc, tx_hash),
-             {:ok, updated_ife} <- InFlightExitInfo.challenge_piggyback(ife, output_index) do
+        with {ife, _} = Map.fetch!(acc, tx_hash),
+             updated_ife = InFlightExitInfo.challenge_piggyback(ife, output_index) do
           # mark as updated
           %{acc | tx_hash => {updated_ife, true}}
         else

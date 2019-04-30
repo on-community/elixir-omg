@@ -195,19 +195,27 @@ defmodule OMG.Watcher.ExitProcessor.Core do
   """
   @spec new_piggybacks(t(), [%{tx_hash: Transaction.tx_hash(), output_index: output_offset()}]) :: {t(), list()}
   def new_piggybacks(%__MODULE__{} = state, piggybacks) when is_list(piggybacks) do
-    {updated_state, updated_pairs} = Enum.reduce(piggybacks, {state, %{}}, &process_piggyback/2)
-    {updated_state, Enum.map(updated_pairs, &InFlightExitInfo.make_db_update/1)}
+    {updated_state, updated_ife_keys} = Enum.reduce(piggybacks, {state, MapSet.new()}, &process_piggyback/2)
+
+    db_updates = ife_db_updates(updated_state, updated_ife_keys)
+
+    {updated_state, db_updates}
+  end
+
+  defp ife_db_updates(%__MODULE__{in_flight_exits: ifes}, updated_ife_keys) do
+    ifes
+    |> Map.take(updated_ife_keys)
+    |> Enum.map(&InFlightExitInfo.make_db_update/1)
   end
 
   defp process_piggyback(
          %{tx_hash: tx_hash, output_index: output_index},
-         {%__MODULE__{in_flight_exits: ifes} = state, db_updates}
+         {%__MODULE__{in_flight_exits: ifes} = state, updated_ife_keys}
        ) do
-    {:ok, ife} = Map.fetch(ifes, tx_hash)
-    {:ok, updated_ife} = InFlightExitInfo.piggyback(ife, output_index)
+    {:ok, updated_ife} = ifes |> Map.fetch!(tx_hash) |> InFlightExitInfo.piggyback(output_index)
 
     updated_state = %{state | in_flight_exits: Map.put(ifes, tx_hash, updated_ife)}
-    {updated_state, Map.put(db_updates, tx_hash, updated_ife)}
+    {updated_state, MapSet.put(updated_ife_keys, tx_hash)}
   end
 
   @doc """
@@ -267,31 +275,31 @@ defmodule OMG.Watcher.ExitProcessor.Core do
   defp delete_positions(utxo_positions),
     do: utxo_positions |> Enum.map(&{:delete, :exit_info, Utxo.Position.to_db_key(&1)})
 
-  # TODO: simplify flow
-  # https://github.com/omisego/elixir-omg/pull/361#discussion_r247481397
   @spec new_ife_challenges(t(), [map()]) :: {t(), list()}
-  def new_ife_challenges(%__MODULE__{in_flight_exits: ifes, competitors: competitors} = state, challenges_events) do
-    challenges = challenges_events |> Enum.map(&CompetitorInfo.new/1)
+  def new_ife_challenges(%__MODULE__{} = state, challenges_events) do
+    {updated_state, updated_ife_keys} = Enum.reduce(challenges_events, {state, MapSet.new()}, &process_ife_challenge/2)
+    ife_db_updates = ife_db_updates(updated_state, updated_ife_keys)
 
-    new_competitors = challenges |> Map.new()
-    competitors_db_updates = challenges |> Enum.map(&CompetitorInfo.make_db_update/1)
+    {updated_state2, competitors_db_updates} = append_new_competitors(updated_state, challenges_events)
 
-    updated_ifes =
-      challenges_events
-      |> Enum.map(fn %{tx_hash: tx_hash, competitor_position: position} ->
-        updated_ife = ifes |> Map.fetch!(tx_hash) |> InFlightExitInfo.challenge(position)
-        {tx_hash, updated_ife}
-      end)
+    {updated_state2, competitors_db_updates ++ ife_db_updates}
+  end
 
-    ife_db_updates = updated_ifes |> Enum.map(&InFlightExitInfo.make_db_update/1)
+  defp append_new_competitors(%__MODULE__{competitors: competitors} = state, challenges_events) do
+    new_competitors = challenges_events |> Enum.map(&CompetitorInfo.new/1)
+    db_updates = new_competitors |> Enum.map(&CompetitorInfo.make_db_update/1)
 
-    state = %{
-      state
-      | competitors: Map.merge(competitors, new_competitors),
-        in_flight_exits: Map.merge(ifes, Map.new(updated_ifes))
-    }
+    {%{state | competitors: Map.merge(competitors, Map.new(new_competitors))}, db_updates}
+  end
 
-    {state, competitors_db_updates ++ ife_db_updates}
+  defp process_ife_challenge(
+         %{tx_hash: tx_hash, competitor_position: position},
+         {%__MODULE__{in_flight_exits: ifes} = state, updated_ife_keys}
+       ) do
+    updated_ife = ifes |> Map.fetch!(tx_hash) |> InFlightExitInfo.challenge(position)
+
+    updated_state = %{state | in_flight_exits: Map.put(ifes, tx_hash, updated_ife)}
+    {updated_state, MapSet.put(updated_ife_keys, tx_hash)}
   end
 
   @spec respond_to_in_flight_exits_challenges(t(), [map()]) :: {t(), list()}

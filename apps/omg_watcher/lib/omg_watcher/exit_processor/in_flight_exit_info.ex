@@ -222,14 +222,14 @@ defmodule OMG.Watcher.ExitProcessor.InFlightExitInfo do
   end
 
   @spec piggyback(t(), non_neg_integer()) ::
-          {:ok, t()} | {:error, :non_existent_exit | :cannot_piggyback}
+          t() | {:error, :non_existent_exit | :cannot_piggyback}
   def piggyback(ife, index)
 
   def piggyback(%__MODULE__{exit_map: exit_map} = ife, index)
       when index in @exit_map_index_range do
     with exit <- Map.get(exit_map, index),
          {:ok, updated_exit} <- piggyback_exit(exit) do
-      {:ok, %{ife | exit_map: Map.put(exit_map, index, updated_exit)}}
+      %{ife | exit_map: Map.put(exit_map, index, updated_exit)}
     end
   end
 

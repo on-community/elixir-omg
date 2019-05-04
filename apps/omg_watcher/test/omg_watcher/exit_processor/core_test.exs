@@ -1310,9 +1310,27 @@ defmodule OMG.Watcher.ExitProcessor.CoreTest do
                |> check_validity_filtered(processor, exclude: [Event.PiggybackAvailable])
     end
 
-    # TODO: implement more behavior tests
     test "none if challenge gets responded and ife canonical",
-         %{} do
+         %{processor_filled: processor, transactions: [tx | _] = txs, competing_tx: comp} do
+      {challenged_processor, _} = Core.new_ife_challenges(processor, [ife_challenge(tx, comp)])
+      txbytes = Transaction.raw_txbytes(tx)
+      other_blknum = 3000
+
+      exit_processor_request = %ExitProcessor.Request{
+        blknum_now: 5000,
+        eth_height_now: 5,
+        blocks_result: [Block.hashed_txs_at(txs, other_blknum)]
+      }
+
+      {responded_processor, _} =
+        challenged_processor
+        |> Core.respond_to_in_flight_exits_challenges([ife_response(tx, Utxo.position(other_blknum, 0, 0))])
+
+      assert {:ok, []} = exit_processor_request |> Core.check_validity(responded_processor)
+
+      assert {:ok, %{}} =
+               exit_processor_request
+               |> Core.prove_canonical_for_ife(txbytes)
     end
   end
 
@@ -1445,6 +1463,9 @@ defmodule OMG.Watcher.ExitProcessor.CoreTest do
       }
     }
   end
+
+  defp ife_response(tx, position),
+    do: %{tx_hash: Transaction.raw_txhash(tx), challenge_position: Utxo.Position.encode(position)}
 
   defp sigs(tx), do: tx.signed_tx.sigs
   defp sig(tx, idx \\ 0), do: tx |> sigs() |> Enum.at(idx)

@@ -266,16 +266,8 @@ defmodule OMG.Watcher.ExitProcessor.InFlightExitInfo do
   end
 
   @spec respond_to_challenge(t(), Utxo.Position.t()) ::
-          {:ok, t()} | {:error, :responded_with_too_young_tx | :cannot_respond}
+          t() | {:error, :responded_with_too_young_tx | :cannot_respond}
   def respond_to_challenge(ife, tx_position)
-
-  def respond_to_challenge(
-        %__MODULE__{oldest_competitor: nil, contract_tx_pos: nil} = ife,
-        tx_position
-      ) do
-    decoded = Utxo.Position.decode!(tx_position)
-    {:ok, %{ife | oldest_competitor: decoded, is_canonical: true, contract_tx_pos: decoded}}
-  end
 
   def respond_to_challenge(
         %__MODULE__{oldest_competitor: current_oldest, contract_tx_pos: nil} = ife,
@@ -283,8 +275,8 @@ defmodule OMG.Watcher.ExitProcessor.InFlightExitInfo do
       ) do
     decoded = Utxo.Position.decode!(tx_position)
 
-    if is_older?(decoded, current_oldest) do
-      {:ok, %{ife | oldest_competitor: decoded, is_canonical: true, contract_tx_pos: decoded}}
+    if is_nil(current_oldest) or is_older?(decoded, current_oldest) do
+      %{ife | oldest_competitor: decoded, is_canonical: true, contract_tx_pos: decoded}
     else
       {:error, :responded_with_too_young_tx}
     end

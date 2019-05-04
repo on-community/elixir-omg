@@ -277,9 +277,8 @@ defmodule OMG.Watcher.ExitProcessor.Core do
   end
 
   @spec respond_to_in_flight_exits_challenges(t(), [map()]) :: {t(), list()}
-  def respond_to_in_flight_exits_challenges(%__MODULE__{in_flight_exits: _ifes} = state, _responds_events) do
-    # TODO: implement and test (in InFlightExitInfo callback is already written)
-    {state, []}
+  def respond_to_in_flight_exits_challenges(%__MODULE__{} = state, responds_events) do
+    consume_events(state, responds_events, :challenge_position, &InFlightExitInfo.respond_to_challenge/2)
   end
 
   @spec challenge_piggybacks(t(), [map()]) :: {t(), list()}

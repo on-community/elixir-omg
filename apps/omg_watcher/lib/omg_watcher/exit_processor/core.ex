@@ -739,7 +739,7 @@ defmodule OMG.Watcher.ExitProcessor.Core do
          true <-
            is_piggyback_in_the_list_of_known_doublespends?(pb_index, pb_type, Map.keys(proof_materials)) ||
              {:error, :no_double_spend_on_particular_piggyback} do
-      challenge_data = prepare_piggyback_challenge_proofs(ife, tx, pb_index, proof_materials)
+      challenge_data = prepare_piggyback_challenge_proofs(ife, pb_type, pb_index, proof_materials)
       {:ok, hd(challenge_data)}
     end
   end
@@ -766,29 +766,28 @@ defmodule OMG.Watcher.ExitProcessor.Core do
   defp is_piggyback_in_the_list_of_known_doublespends?(pb_index, :output, bad_outputs),
     do: (pb_index - 4) in bad_outputs
 
-  defp prepare_piggyback_challenge_proofs(_ife, tx, input_index, proofs)
-       when input_index in 0..(Transaction.max_inputs() - 1) do
-    for {competing_ktx, _utxo_of_doublespend, his_doublespend_input_index} <- Map.get(proofs, input_index),
+  defp prepare_piggyback_challenge_proofs(ife, :input, input_index, proofs) do
+    for proof <- Map.get(proofs, input_index),
         do: %{
-          in_flight_txbytes: Transaction.raw_txbytes(tx),
+          in_flight_txbytes: Transaction.raw_txbytes(ife.tx),
           in_flight_input_index: input_index,
-          spending_txbytes: Transaction.raw_txbytes(competing_ktx.signed_tx),
-          spending_input_index: his_doublespend_input_index,
-          spending_sig: Enum.at(competing_ktx.signed_tx.sigs, his_doublespend_input_index)
+          spending_txbytes: Transaction.raw_txbytes(proof.known_tx.signed_tx),
+          spending_input_index: proof.known_spent_index,
+          spending_sig: Enum.at(proof.known_tx.signed_tx.sigs, proof.known_spent_index)
         }
   end
 
-  defp prepare_piggyback_challenge_proofs(ife, tx, output_index, proofs) when output_index in 4..7 do
-    for {competing_ktx, utxo_of_doublespend, his_doublespend_input_index} <- Map.get(proofs, output_index - 4) do
-      {_, inclusion_proof} = ife.tx_seen_in_blocks_at
+  defp prepare_piggyback_challenge_proofs(ife, :output, output_index, proofs) do
+    for proof <- Map.get(proofs, output_index - 4) do
+      {, inclusion_proof} = ife.tx_seen_in_blocks_at
 
       %{
-        in_flight_txbytes: Transaction.raw_txbytes(tx),
-        in_flight_output_pos: utxo_of_doublespend,
+        in_flight_txbytes: Transaction.raw_txbytes(ife.tx),
+        in_flight_output_pos: proof.utxo_pos,
         in_flight_proof: inclusion_proof,
-        spending_txbytes: Transaction.raw_txbytes(competing_ktx.signed_tx),
-        spending_input_index: his_doublespend_input_index,
-        spending_sig: Enum.at(competing_ktx.signed_tx.sigs, his_doublespend_input_index)
+        spending_txbytes: Transaction.raw_txbytes(proof.known_tx.signed_tx),
+        spending_input_index: proof.known_spent_index,
+        spending_sig: Enum.at(proof.known_tx.signed_tx.sigs, proof.known_spent_index)
       }
     end
   end
@@ -821,16 +820,6 @@ defmodule OMG.Watcher.ExitProcessor.Core do
     end)
   end
 
-  @spec get_invalid_piggybacks_on_inputs([KnownTx.t()], t()) :: [
-          {InFlightExitInfo.t(), Transaction.tx_hash(), [input_pb, ...], [],
-           %{
-             input_pb => [
-               {double_spending_tx :: KnownTx.t(), input_utxo :: Utxo.Position.t(),
-                doublespend_index :: Transaction.input_index_t()}
-             ]
-           }}
-        ]
-        when input_pb: Transaction.input_index_t()
   defp get_invalid_piggybacks_on_inputs(known_txs, %__MODULE__{in_flight_exits: ifes}) do
     known_txs = :lists.usort(known_txs)
 
@@ -849,28 +838,20 @@ defmodule OMG.Watcher.ExitProcessor.Core do
     |> Enum.filter(fn {_ife, inputs} -> inputs != [] end)
     |> Enum.map(fn {ife, inputs} ->
       proof_materials = find_spends(inputs, known_txs, ife.tx.raw_tx)
+      # FIXME: structify?
       {ife, :input, proof_materials}
     end)
     |> Enum.filter(fn {_, _, materials_on_outputs} -> !Enum.empty?(materials_on_outputs) end)
   end
 
-  @spec get_invalid_piggybacks_on_outputs([KnownTx.t()], t()) :: [
-          {InFlightExitInfo.t(), Transaction.tx_hash(), [], [output_pb, ...],
-           %{
-             output_pb => [
-               {double_spending_tx :: KnownTx.t(), input_utxo :: Utxo.Position.t(),
-                his_doublespend :: Transaction.input_index_t()}
-             ]
-           }}
-        ]
-        when output_pb: Transaction.input_index_t()
+  # FIXME: recreate specs here and avove
   defp get_invalid_piggybacks_on_outputs(known_txs, %__MODULE__{in_flight_exits: ifes}) do
     # To find bad piggybacks on outputs of IFE, we need to find spends on those outputs.
     # To do that, we first need to find IFE inclusion position.
     # If IFE was included, the value of :tx_seen_in_blocks_at is set.
     # Next, check its spends, which are already included into request.blocks_result
 
-    # TODO: drop next line
+    # FIXME: drop next line HERE AND ABOVE
     known_txs = :lists.usort(known_txs)
 
     ifes
@@ -897,11 +878,8 @@ defmodule OMG.Watcher.ExitProcessor.Core do
     |> Enum.filter(&(original_tx != &1.signed_tx.raw_tx))
     |> Enum.map(fn ktx -> {ktx, get_double_spends(single_tx_indexed_inputs, ktx)} end)
     |> Enum.filter(fn {_ktx, doublespends} -> doublespends != [] end)
-    |> Enum.flat_map(fn {ktx, dbl_spends} ->
-      {my_indexes, utxo_poses, his_indexes} = :lists.unzip3(dbl_spends)
-      Enum.zip([my_indexes, List.duplicate(ktx, length(my_indexes)), utxo_poses, his_indexes])
-    end)
-    |> Enum.group_by(&elem(&1, 0), &Tuple.delete_at(&1, 0))
+    |> Enum.flat_map(fn {ktx, dbl_spends} -> dbl_spends |> Enum.map(&Map.put(&1, :known_tx, ktx)) end)
+    |> Enum.group_by(& &1.index)
   end
 
   @spec get_piggyback_challenge_data(ExitProcessor.Request.t(), t(), Transaction.Signed.tx_bytes(), 0..7) ::
@@ -1199,39 +1177,22 @@ defmodule OMG.Watcher.ExitProcessor.Core do
 
   # Intersects utxos, looking for duplicates. Gives full list of double-spends with indexes for
   # a pair of transactions.
-  @spec get_double_spends(tx_input_info, tx_input_info) :: [
-          {Transaction.input_index_t(), Utxo.Position.t(), Transaction.input_index_t()}
-        ]
-        when tx_input_info:
-               Transaction.Signed.t()
-               | Transaction.t()
-               | KnownTx.t()
-               | [{Transaction.input(), Transaction.input_index_t()}]
-  defp get_double_spends(inputs, known_spent_inputs) when is_list(inputs) and is_list(known_spent_inputs) do
+  # FIXME: redo specs
+  defp get_double_spends(inputs, %KnownTx{signed_tx: signed}) when is_list(inputs) do
+    known_spent_inputs =
+      signed
+      |> Transaction.get_inputs()
+      |> Enum.with_index()
+
     # TODO: possibly ineffective if Transaction.max_inputs >> 4
     list =
       for {left, left_index} <- inputs,
           {right, right_index} <- known_spent_inputs,
           left == right,
-          do: {left_index, left, right_index}
+          # FIXME: structify?
+          do: %{index: left_index, utxo_pos: left, known_spent_index: right_index}
 
     :lists.usort(list)
-  end
-
-  defp get_double_spends(inputs, known_spent_inputs) do
-    get_double_spends(index_inputs(inputs), index_inputs(known_spent_inputs))
-  end
-
-  defp index_inputs(inputs_list) when is_list(inputs_list) do
-    inputs_list
-  end
-
-  defp index_inputs(%KnownTx{signed_tx: signed}), do: index_inputs(signed)
-
-  defp index_inputs(tx) do
-    tx
-    |> Transaction.get_inputs()
-    |> Enum.with_index()
   end
 
   defp get_known_txs(%__MODULE__{} = state) do

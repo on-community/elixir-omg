@@ -306,6 +306,7 @@ defmodule OMG.Watcher.ExitProcessor.InFlightExitInfo do
         tx_seen_in_blocks_at: {txpos, _},
         exit_map: exit_map
       }) do
+    # FIXME: use utxo macros
     {_, blknum, txindex, _} = txpos
 
     @outputs_index_range

@@ -779,11 +779,11 @@ defmodule OMG.Watcher.ExitProcessor.Core do
 
   defp prepare_piggyback_challenge_proofs(ife, :output, output_index, proofs) do
     for proof <- Map.get(proofs, output_index - 4) do
-      {, inclusion_proof} = ife.tx_seen_in_blocks_at
+      {pos, inclusion_proof} = ife.tx_seen_in_blocks_at
 
       %{
         in_flight_txbytes: Transaction.raw_txbytes(ife.tx),
-        in_flight_output_pos: proof.utxo_pos,
+        in_flight_output_pos: pos,
         in_flight_proof: inclusion_proof,
         spending_txbytes: Transaction.raw_txbytes(proof.known_tx.signed_tx),
         spending_input_index: proof.known_spent_index,
@@ -876,9 +876,9 @@ defmodule OMG.Watcher.ExitProcessor.Core do
     # Will find all spenders of provided indexed inputs.
     known_txs
     |> Enum.filter(&(original_tx != &1.signed_tx.raw_tx))
-    |> Enum.map(fn ktx -> {ktx, get_double_spends(single_tx_indexed_inputs, ktx)} end)
-    |> Enum.filter(fn {_ktx, doublespends} -> doublespends != [] end)
-    |> Enum.flat_map(fn {ktx, dbl_spends} -> dbl_spends |> Enum.map(&Map.put(&1, :known_tx, ktx)) end)
+    |> Enum.map(&get_double_spends(single_tx_indexed_inputs, &1))
+    |> Enum.filter(&(!Enum.empty?(&1)))
+    |> Enum.concat()
     |> Enum.group_by(& &1.index)
   end
 
@@ -1178,21 +1178,15 @@ defmodule OMG.Watcher.ExitProcessor.Core do
   # Intersects utxos, looking for duplicates. Gives full list of double-spends with indexes for
   # a pair of transactions.
   # FIXME: redo specs
-  defp get_double_spends(inputs, %KnownTx{signed_tx: signed}) when is_list(inputs) do
-    known_spent_inputs =
-      signed
-      |> Transaction.get_inputs()
-      |> Enum.with_index()
+  defp get_double_spends(inputs, %KnownTx{signed_tx: signed} = known_tx) when is_list(inputs) do
+    known_spent_inputs = signed |> Transaction.get_inputs() |> Enum.with_index()
 
     # TODO: possibly ineffective if Transaction.max_inputs >> 4
-    list =
-      for {left, left_index} <- inputs,
-          {right, right_index} <- known_spent_inputs,
-          left == right,
-          # FIXME: structify?
-          do: %{index: left_index, utxo_pos: left, known_spent_index: right_index}
-
-    :lists.usort(list)
+    for {left, left_index} <- inputs,
+        {right, right_index} <- known_spent_inputs,
+        left == right,
+        # FIXME: structify?
+        do: %{index: left_index, utxo_pos: left, known_spent_index: right_index, known_tx: known_tx}
   end
 
   defp get_known_txs(%__MODULE__{} = state) do

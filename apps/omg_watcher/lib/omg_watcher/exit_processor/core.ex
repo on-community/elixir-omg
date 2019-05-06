@@ -733,25 +733,26 @@ defmodule OMG.Watcher.ExitProcessor.Core do
   defp produce_invalid_piggyback_proof(%ExitProcessor.Request{blocks_result: blocks}, state, tx, pb_index) do
     known_txs = get_known_txs(blocks) ++ get_known_txs(state)
 
-    with {:ok, {ife, _encoded_tx, bad_inputs, bad_outputs, proofs}} <-
+    with {:ok, {ife, pb_type, proof_materials}} <-
            get_proofs_for_particular_ife(tx, pb_index, known_txs, state),
+         # FIXME: attempt to dry the Map.keys
          true <-
-           is_piggyback_in_the_list_of_known_doublespends?(pb_index, bad_inputs, bad_outputs) ||
+           is_piggyback_in_the_list_of_known_doublespends?(pb_index, pb_type, Map.keys(proof_materials)) ||
              {:error, :no_double_spend_on_particular_piggyback} do
-      challenge_data = prepare_piggyback_challenge_proofs(ife, tx, pb_index, proofs)
+      challenge_data = prepare_piggyback_challenge_proofs(ife, tx, pb_index, proof_materials)
       {:ok, hd(challenge_data)}
     end
   end
 
   defp get_proofs_for_particular_ife(tx, pb_index, known_txs, state) do
-    encoded_tx = Transaction.raw_txbytes(tx)
+    query_tx_hash = Transaction.raw_txhash(tx)
 
     case pb_index < Transaction.max_inputs() do
       true -> get_invalid_piggybacks_on_inputs(known_txs, state)
       false -> get_invalid_piggybacks_on_outputs(known_txs, state)
     end
-    |> Enum.filter(fn {_, ife_tx, _, _, _} ->
-      encoded_tx == ife_tx
+    |> Enum.filter(fn {ife, _, _} ->
+      query_tx_hash == Transaction.raw_txhash(ife.tx)
     end)
     |> case do
       [] -> {:error, :no_double_spend_on_particular_piggyback}
@@ -759,8 +760,11 @@ defmodule OMG.Watcher.ExitProcessor.Core do
     end
   end
 
-  defp is_piggyback_in_the_list_of_known_doublespends?(pb_index, bad_inputs, bad_outputs),
-    do: pb_index in bad_inputs or (pb_index - 4) in bad_outputs
+  defp is_piggyback_in_the_list_of_known_doublespends?(pb_index, :input, bad_inputs),
+    do: pb_index in bad_inputs
+
+  defp is_piggyback_in_the_list_of_known_doublespends?(pb_index, :output, bad_outputs),
+    do: (pb_index - 4) in bad_outputs
 
   defp prepare_piggyback_challenge_proofs(_ife, tx, input_index, proofs)
        when input_index in 0..(Transaction.max_inputs() - 1) do
@@ -801,12 +805,19 @@ defmodule OMG.Watcher.ExitProcessor.Core do
     bad_piggybacks_on_outputs = get_invalid_piggybacks_on_outputs(known_txs, state)
     # produce only one event per IFE, with both piggybacks on inputs and outputs
     (bad_piggybacks_on_inputs ++ bad_piggybacks_on_outputs)
-    |> Enum.group_by(&elem(&1, 1), fn {_, _, ins, outs, _} ->
-      {ins, outs}
+    |> Enum.group_by(&Transaction.raw_txbytes(elem(&1, 0).tx), fn {_, type, materials} ->
+      {type, materials}
     end)
-    |> Enum.map(fn {txhash, zipped_bad_piggyback_indexes} ->
-      {all_ins, all_outs} = Enum.unzip(zipped_bad_piggyback_indexes)
-      {txhash, List.flatten(all_ins), List.flatten(all_outs)}
+    |> Enum.map(fn {txbytes, type_materials_pairs} ->
+      grouped_by_type =
+        type_materials_pairs
+        |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
+
+      {
+        txbytes,
+        Map.get(grouped_by_type, :input, []) |> Enum.flat_map(&Map.keys/1),
+        Map.get(grouped_by_type, :output, []) |> Enum.flat_map(&Map.keys/1)
+      }
     end)
   end
 
@@ -838,9 +849,9 @@ defmodule OMG.Watcher.ExitProcessor.Core do
     |> Enum.filter(fn {_ife, inputs} -> inputs != [] end)
     |> Enum.map(fn {ife, inputs} ->
       proof_materials = find_spends(inputs, known_txs, ife.tx.raw_tx)
-      {ife, Transaction.raw_txbytes(ife.tx), Map.keys(proof_materials), [], proof_materials}
+      {ife, :input, proof_materials}
     end)
-    |> Enum.filter(fn {_, _, on_inputs, _, _} -> on_inputs != [] end)
+    |> Enum.filter(fn {_, _, materials_on_outputs} -> !Enum.empty?(materials_on_outputs) end)
   end
 
   @spec get_invalid_piggybacks_on_outputs([KnownTx.t()], t()) :: [
@@ -875,9 +886,9 @@ defmodule OMG.Watcher.ExitProcessor.Core do
     |> Enum.filter(fn {_ife, piggybacked_output_utxos} -> piggybacked_output_utxos != [] end)
     |> Enum.map(fn {ife, piggybacked_output_utxos} ->
       proof_materials = find_spends(piggybacked_output_utxos, known_txs, ife.tx.raw_tx)
-      {ife, Transaction.raw_txbytes(ife.tx), [], Map.keys(proof_materials), proof_materials}
+      {ife, :output, proof_materials}
     end)
-    |> Enum.filter(fn {_, _, _, on_outputs, _} -> on_outputs != [] end)
+    |> Enum.filter(fn {_, _, materials_on_outputs} -> !Enum.empty?(materials_on_outputs) end)
   end
 
   defp find_spends(single_tx_indexed_inputs, known_txs, original_tx) do

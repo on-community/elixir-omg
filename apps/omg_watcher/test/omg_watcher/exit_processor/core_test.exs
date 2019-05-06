@@ -667,6 +667,8 @@ defmodule OMG.Watcher.ExitProcessor.CoreTest do
                Core.get_output_challenge_data(exit_processor_request, state, txbytes, 0)
     end
 
+    # FIXME: add tests for valid piggybacks somewhere
+
     test "handles well situation when syncing is in progress",
          %{processor_filled: state, ife_tx_hashes: [ife_id | _]} do
       state = piggyback_ife_from(state, ife_id, 4)

@@ -53,7 +53,7 @@ defmodule OMG.Umbrella.MixProject do
 
   defp dialyzer do
     [
-      flags: [:error_handling, :race_conditions, :underspecs, :unknown, :unmatched_returns],
+      flags: [:specdiffs, :error_handling, :race_conditions, :underspecs, :unknown, :unmatched_returns],
       ignore_warnings: "dialyzer.ignore-warnings",
       plt_add_apps: plt_apps()
     ]

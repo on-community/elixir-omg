@@ -48,6 +48,7 @@ RUN set -xe \
 
 ARG release_version
 
+RUN ls _build/prod/rel/watcher/releases/
 ADD _build/prod/rel/watcher/releases/${release_version}/watcher.tar.gz /app
 RUN chown -R "${uid}:${gid}" /app
 WORKDIR /app

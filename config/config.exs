@@ -11,7 +11,7 @@ import_config "../apps/*/config/config.exs"
 
 # Sample configuration (overrides the imported configuration above):
 
-config :logger, level: :info
+config :logger, level: :warn#:info
 
 config :logger, :console,
   format: "$date $time [$level] $metadata⋅$message⋅\n",

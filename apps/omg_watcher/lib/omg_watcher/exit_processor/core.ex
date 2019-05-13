@@ -1071,8 +1071,8 @@ defmodule OMG.Watcher.ExitProcessor.Core do
     # find its competitor and use it to prepare the requested data
     with {:ok, ife_tx} <- Transaction.decode(ife_txbytes),
          {:ok, %InFlightExitInfo{tx: signed_ife_tx}} <- get_ife(ife_tx, state),
-         {:ok, known_signed_tx} <- find_competitor(known_txs, signed_ife_tx),
-         do: {:ok, prepare_competitor_response(known_signed_tx, signed_ife_tx, blocks)}
+         {:ok, double_spend} <- find_competitor(known_txs, signed_ife_tx),
+         do: {:ok, prepare_competitor_response(double_spend, signed_ife_tx, blocks)}
   end
 
   @doc """
@@ -1093,19 +1093,15 @@ defmodule OMG.Watcher.ExitProcessor.Core do
   end
 
   defp prepare_competitor_response(
-         %KnownTx{signed_tx: known_signed_tx, utxo_pos: known_tx_utxo_pos},
+         %DoubleSpend{
+           index: in_flight_input_index,
+           known_spent_index: competing_input_index,
+           known_tx: %KnownTx{signed_tx: known_signed_tx, utxo_pos: known_tx_utxo_pos}
+         },
          signed_ife_tx,
          blocks
        ) do
-    ife_inputs = Transaction.get_inputs(signed_ife_tx)
-
-    known_spent_inputs = Transaction.get_inputs(known_signed_tx)
     {:ok, input_owners} = Transaction.Signed.get_spenders(signed_ife_tx)
-
-    # get info about the double spent input and it's respective indices in transactions
-    spent_input = competitor_for(signed_ife_tx, known_signed_tx)
-    in_flight_input_index = Enum.find_index(ife_inputs, &(&1 == spent_input))
-    competing_input_index = Enum.find_index(known_spent_inputs, &(&1 == spent_input))
 
     owner = Enum.at(input_owners, in_flight_input_index)
 
@@ -1138,7 +1134,7 @@ defmodule OMG.Watcher.ExitProcessor.Core do
 
   defp find_competitor(known_txs, signed_ife_tx) do
     known_txs
-    |> Enum.find(fn known -> competitor_for(signed_ife_tx, known) end)
+    |> Enum.find_value(fn known -> competitor_for(signed_ife_tx, known) end)
     |> case do
       nil -> {:error, :competitor_not_found}
       value -> {:ok, value}
@@ -1155,22 +1151,13 @@ defmodule OMG.Watcher.ExitProcessor.Core do
   end
 
   # Tells whether a single transaction is a competitor for another single transactions, by returning nil or the
-  # UTXO position of the input double spent.
+  # `DoubleSpend` information package if the `known_tx` is in fact a competitor
   # Returns single result, even if there are multiple double-spends!
-  @spec competitor_for(Transaction.Signed.t(), Transaction.Signed.t() | KnownTx.t() | Transaction.t()) ::
-          Utxo.Position.t() | nil
-
-  # this function doesn't care, if the second argument holds additional information about the utxo position
-  defp competitor_for(signed1, %KnownTx{signed_tx: signed2}),
-    do: competitor_for(signed1, signed2)
-
-  defp competitor_for(tx, known_tx) do
-    inputs = Transaction.get_inputs(tx)
-    known_spent_inputs = Transaction.get_inputs(known_tx)
-
-    with true <- txs_different(tx, known_tx),
-         Utxo.position(_, _, _) = double_spent_input <- inputs |> Enum.find(&Enum.member?(known_spent_inputs, &1)),
-         do: double_spent_input
+  defp competitor_for(tx, %KnownTx{signed_tx: known_signed_tx} = known_tx) do
+    with true <- txs_different(tx, known_signed_tx) || nil,
+         double_spends = tx |> Transaction.get_inputs() |> Enum.with_index() |> double_spends_from_known_tx(known_tx),
+         true <- !Enum.empty?(double_spends) || nil,
+         do: hd(double_spends)
   end
 
   # Intersects utxos, looking for duplicates. Gives full list of double-spends with indexes for

@@ -638,6 +638,44 @@ defmodule OMG.Watcher.ExitProcessor.CoreTest do
       assert_proof_sound(proof_bytes)
     end
 
+    test "detects no double-spend of an input, if a different input is being spent in block",
+         %{processor_filled: state, competing_tx: comp, ife_tx_hashes: [ife_id | _]} do
+      # NOTE: the piggybacked index is the second one, compared to the invalid piggyback situation
+      state = state |> piggyback_ife_from(ife_id, 1)
+
+      request = %ExitProcessor.Request{
+        blknum_now: 5000,
+        eth_height_now: 5,
+        blocks_result: [Block.hashed_txs_at([comp], 4000)]
+      }
+
+      state = Core.find_ifes_in_blocks(request, state)
+
+      assert {:ok, []} = check_validity_filtered(request, state, only: [Event.InvalidPiggyback])
+    end
+
+    test "detects no double-spend of an output, if a different output is being spent in block",
+         %{alice: alice, processor_filled: state, transactions: [tx | _], ife_tx_hashes: [ife_id | _]} do
+      tx_blknum = 3000
+
+      # 2. transaction which _doesn't_ spend that piggybacked output
+      comp = TestHelper.create_recovered([{tx_blknum, 0, 0, alice}], [])
+
+      # NOTE: the piggybacked index is the second one, compared to the invalid piggyback situation
+      state = state |> piggyback_ife_from(ife_id, 5)
+
+      request = %ExitProcessor.Request{
+        blknum_now: 5000,
+        eth_height_now: 5,
+        ife_input_spending_blocks_result: [Block.hashed_txs_at([tx], tx_blknum)]
+      }
+
+      state = Core.find_ifes_in_blocks(request, state)
+
+      request = %{request | blocks_result: [Block.hashed_txs_at([comp], 4000)]}
+      assert {:ok, []} = check_validity_filtered(request, state, only: [Event.InvalidPiggyback])
+    end
+
     test "does not look into ife_input_spending_blocks_result when it should not",
          %{processor_filled: state, transactions: [tx | _], ife_tx_hashes: [ife_id | _]} do
       txbytes = txbytes(tx)
@@ -666,8 +704,6 @@ defmodule OMG.Watcher.ExitProcessor.CoreTest do
       assert {:error, :no_double_spend_on_particular_piggyback} =
                Core.get_output_challenge_data(exit_processor_request, state, txbytes, 0)
     end
-
-    # FIXME: add tests for valid piggybacks somewhere
 
     test "handles well situation when syncing is in progress",
          %{processor_filled: state, ife_tx_hashes: [ife_id | _]} do
@@ -706,7 +742,7 @@ defmodule OMG.Watcher.ExitProcessor.CoreTest do
       assert Utxo.position(1, 0, 0) in request.ife_input_spends_to_get
     end
 
-    test "detects multiple double-spends in single IFE",
+    test "detects multiple double-spends in single IFE, correctly as more piggybacks appear",
          %{alice: alice, processor_filled: state, transactions: [tx | _], ife_tx_hashes: [ife_id | _]} do
       tx_blknum = 3000
       txbytes = txbytes(tx)
@@ -720,13 +756,6 @@ defmodule OMG.Watcher.ExitProcessor.CoreTest do
       {comp_txbytes, alice_sig} = {txbytes(comp), sig(comp)}
       state = state |> start_ife_from(comp)
 
-      state =
-        state
-        |> piggyback_ife_from(ife_id, 0)
-        |> piggyback_ife_from(ife_id, 1)
-        |> piggyback_ife_from(ife_id, 4)
-        |> piggyback_ife_from(ife_id, 5)
-
       request = %ExitProcessor.Request{
         blknum_now: 4000,
         eth_height_now: 5,
@@ -734,6 +763,25 @@ defmodule OMG.Watcher.ExitProcessor.CoreTest do
       }
 
       state = Core.find_ifes_in_blocks(request, state)
+
+      assert {:ok, []} = check_validity_filtered(request, state, only: [Event.InvalidPiggyback])
+
+      state = state |> piggyback_ife_from(ife_id, 0)
+
+      assert {:ok, [%Event.InvalidPiggyback{txbytes: ^txbytes, inputs: [0], outputs: []}]} =
+               check_validity_filtered(request, state, only: [Event.InvalidPiggyback])
+
+      state = state |> piggyback_ife_from(ife_id, 1)
+
+      assert {:ok, [%Event.InvalidPiggyback{txbytes: ^txbytes, inputs: [0, 1], outputs: []}]} =
+               check_validity_filtered(request, state, only: [Event.InvalidPiggyback])
+
+      state = state |> piggyback_ife_from(ife_id, 4)
+
+      assert {:ok, [%Event.InvalidPiggyback{txbytes: ^txbytes, inputs: [0, 1], outputs: [0]}]} =
+               check_validity_filtered(request, state, only: [Event.InvalidPiggyback])
+
+      state = state |> piggyback_ife_from(ife_id, 5)
 
       assert {:ok, [%Event.InvalidPiggyback{txbytes: ^txbytes, inputs: [0, 1], outputs: [0, 1]}]} =
                check_validity_filtered(request, state, only: [Event.InvalidPiggyback])

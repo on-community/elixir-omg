@@ -874,7 +874,7 @@ defmodule OMG.Watcher.ExitProcessor.Core do
     |> Stream.map(fn %InFlightExitInfo{tx: %Transaction.Signed{raw_tx: raw_tx}} -> raw_tx end)
     # TODO: expensive!
     |> Stream.filter(fn raw_tx ->
-      is_among_known_txs?(raw_tx, known_txs)
+      is_among_known_txs?(known_txs, raw_tx)
     end)
     |> Stream.map(&Transaction.raw_txbytes/1)
     |> Enum.uniq()
@@ -893,7 +893,7 @@ defmodule OMG.Watcher.ExitProcessor.Core do
     |> Stream.filter(fn %InFlightExitInfo{is_active: is_active} -> is_active end)
     # TODO: expensive!
     |> Stream.filter(fn %InFlightExitInfo{tx: %Transaction.Signed{raw_tx: raw_tx}} ->
-      !is_among_known_txs?(raw_tx, known_txs)
+      !is_among_known_txs?(known_txs, raw_tx)
     end)
     |> Enum.uniq_by(fn %InFlightExitInfo{tx: signed_tx} -> signed_tx end)
   end
@@ -1084,7 +1084,7 @@ defmodule OMG.Watcher.ExitProcessor.Core do
 
   defp find_canonical(known_txs, raw_ife_tx) do
     known_txs
-    |> Enum.find(fn %KnownTx{signed_tx: %Transaction.Signed{raw_tx: block_raw_tx}} -> block_raw_tx == raw_ife_tx end)
+    |> is_among_known_txs?(raw_ife_tx)
     |> case do
       nil -> {:error, :canonical_not_found}
       value -> {:ok, value}
@@ -1124,10 +1124,9 @@ defmodule OMG.Watcher.ExitProcessor.Core do
   defp get_known_txs([%Block{} | _] = blocks),
     do: blocks |> Enum.sort_by(fn block -> block.number end) |> Enum.flat_map(&get_known_txs/1)
 
-  defp is_among_known_txs?(raw_tx, known_txs) do
-    Enum.find(known_txs, fn %KnownTx{signed_tx: %Transaction.Signed{raw_tx: block_raw_tx}} ->
-      raw_tx == block_raw_tx
-    end)
+  defp is_among_known_txs?(known_txs, raw_tx) do
+    known_txs
+    |> Enum.find(fn %KnownTx{signed_tx: %Transaction.Signed{raw_tx: block_raw_tx}} -> raw_tx == block_raw_tx end)
   end
 
   defp zero_address?(address) do

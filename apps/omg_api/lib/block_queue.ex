@@ -169,7 +169,15 @@ defmodule OMG.API.BlockQueue do
       submit_result = OMG.Eth.RootChain.submit_block(hash, nonce, gas_price)
       {:ok, newest_mined_blknum} = Eth.RootChain.get_mined_child_block()
 
-      :ok = Core.process_submit_result(submission, submit_result, newest_mined_blknum)
+      final_result = Core.process_submit_result(submission, submit_result, newest_mined_blknum)
+
+      _ =
+        case final_result do
+          {:error, _} -> log_eth_node_error()
+          other -> :ok
+        end
+
+      :ok = final_result
     end
 
     defp log_init_error(fields) do
@@ -177,10 +185,25 @@ defmodule OMG.API.BlockQueue do
       fields = Keyword.update!(fields, :known_hashes, fn hashes -> Enum.map(hashes, &Eth.Encoding.to_hex/1) end)
       diagnostic = fields |> Enum.into(%{config: config})
 
-      Logger.error(
+      _ = Logger.error(
         "The child chain might have not been wiped clean when starting a child chain from scratch: " <>
           "#{inspect(diagnostic)}. Check README.MD and follow the setting up child chain."
       )
+      log_eth_node_error()
+    end
+
+    defp log_eth_node_error do
+      eth_node_diagnostics = get_eth_node_diagnostics()
+      Logger.error("Ethereum operation failed, additional diagnostics: #{inspect(eth_node_diagnostics)}")
+    end
+
+    defp get_eth_node_diagnostics do
+      %{
+        "personal_listWallets" => Ethereumex.HttpClient.request("personal_listWallets", [], []),
+        "admin_nodeInfo" => Ethereumex.HttpClient.request("admin_nodeInfo", [], [])
+      }
+    rescue
+      error -> error
     end
   end
 end
